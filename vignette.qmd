@@ -1,0 +1,535 @@
+---
+title: "Vignette on MFPCA for Gait data"
+author: "Mia Tackney"
+format: html
+editor: visual
+---
+
+## Preliminaries
+
+We load R libraries, and an R function to compute MFPCA projection scores.
+
+```{r}
+#| message: false
+#| warning: false
+source("00_init.R")
+source("02_projection_scores.R")
+
+#knee kinematic data for individuals with PD 
+PD_data <- readRDS("Datasets/left_knee_data.RDS")
+
+#data on gold-standard outcomes for individuals with PD 
+PDGinfo <- read_excel("Datasets/PDGinfo.xlsx")
+
+#knee kinematic data for healthy participants
+healthy_data <- readRDS("Datasets/healthy_knee_data.RDS")
+```
+
+## Datasets
+
+We use left knee flexion-extension data from two open source datasets.
+
+### Parkinson's Disease 
+
+The first dataset is from individuals living with Parkinson's Disease. This is obtained from:
+
+Boari, Daniel (2021). A dataset of overground walking full-body kinematics and kinetics in individuals with Parkinson’s disease. figshare. Dataset. <https://doi.org/10.6084/m9.figshare.14896881.v4>
+
+### Healthy Dataset 
+
+The second dataset is from healthy individuals. This is obtained from:
+
+Helwig, N. & Hsiao-Wecksler, E. (2016). Multivariate Gait Data. Dataset. UCI Machine Learning Repository. <https://doi.org/10.24432/C5861T.>\
+\
+Please see "01_combine_datasets.R" to see how left knee flexion-extension data is extracted from the datasets.
+
+The PD dataset is shown below. Four subjects do not have UPDRS scores recorded, so they are excluded from this analysis.
+
+```{r}
+PD_data <- PD_data %>% 
+  filter(!(Subject %in% c("SUB04", "SUB23", "SUB25", "SUB26")))
+
+head(PD_data)
+```
+
+In addition to kinematic data, we have data on clinical outcomes, which are tidied below.
+
+```{r}
+PDGinfo <- PDGinfo %>% 
+  filter(!(ID %in% c("SUB04", "SUB23", "SUB25", "SUB26")))
+
+head(PDGinfo)
+
+diagnosis_wide <- data.frame(Subject=PDGinfo$ID, 
+                             UPDRS_II_OFF= PDGinfo$`OFF - UPDRS-II`,
+                             UPDRS_III_OFF= PDGinfo$`OFF - UPDRS-III`,
+                             UPDRS_II_ON=PDGinfo$`ON - UPDRS-II`,
+                             UPDRS_III_ON=PDGinfo$`ON - UPDRS-III`)
+```
+
+# Visualising knee flexion-extention curves
+
+We visualise the kinematic data, focusing on on just four patients. We illustrate the knee flexion-extension curves over the Gait cycle on two occasions per person: when they are on medication, versus when they are off medication.
+
+```{r}
+
+plot_data <- PD_data %>% filter(Subject %in% 
+                                   c("SUB01", "SUB02", "SUB03", "SUB07"))
+
+plot_data$Subject <- factor(plot_data$Subject)
+levels(plot_data$Subject) =c("Subject 01", "Subject 02", "Subject 03", "Subject 07")
+
+p <- ggplot(plot_data, aes(x=`Gait cycle [%]`, y=value, group=Stride)) +
+  geom_line(color="grey30") + 
+  theme_bw()+
+  theme(strip.text.y = element_text(angle = 0), # 0 makes text horizontal
+        strip.background = element_rect(fill = "white", color = "black"))+
+  facet_grid(Medication~Subject) + 
+  ylab("Knee flexion-extension angle")
+
+p
+```
+
+# Fitting MFPCA on healthy dataset 
+
+We fit MFPCA on healthy dataset. This requires first putting data wide format.
+
+```{r}
+healthy_data <- readRDS("Datasets/healthy_knee_data.RDS")
+healthy_wide_dat <- healthy_data %>% 
+  dplyr::select(Subject, `Gait cycle [%]`, Stride, Angle) %>% 
+  mutate(Subject_Stride = interaction(Subject, Stride, sep = "_"))  
+
+healthy_wide_dat <- healthy_wide_dat %>%
+  pivot_wider(id_cols=Subject_Stride, 
+              names_from=`Gait cycle [%]`, 
+              values_from=Angle)
+
+healthy_wide_dat <- healthy_wide_dat %>% separate(
+  Subject_Stride,
+  into = c("Subject", "Stride"),
+  sep = "_",
+  convert = TRUE
+)
+```
+
+We fit MFPCA with the mfpca.face() function in the refund package. We fit 10 principal components.
+
+```{r}
+k=10
+increments=1:100
+
+#two-level mfpca 
+res_healthy_2way <- mfpca.face(Y = as.matrix(healthy_wide_dat[,-c(1:3)]), 
+                               id=healthy_wide_dat$Subject,
+                               npc = c(k,k))
+
+res_healthy_2way_results <- data.frame(Gait=increments,
+                                       e1.FPC1=res_healthy_2way$efunctions$level1[,1], 
+                                       e1.FPC2=res_healthy_2way$efunctions$level1[,2], 
+                                       e1.FPC3=res_healthy_2way$efunctions$level1[,3],
+                                       e2.FPC1=res_healthy_2way$efunctions$level2[,1], 
+                                       e2.FPC2=res_healthy_2way$efunctions$level2[,2], 
+                                       e2.FPC3=res_healthy_2way$efunctions$level2[,3])
+
+fpca_results_healthy <- res_healthy_2way_results %>% pivot_longer(cols=-c(Gait), names_to="e", values_to="Eigenfunction")
+fpca_results_healthy$Level <- substr(fpca_results_healthy$e, 2, 2)
+fpca_results_healthy$Level <- ifelse(fpca_results_healthy$Level==1, "Between-subject", "Within-subject")
+fpca_results_healthy$FPC <- substr(fpca_results_healthy$e, 4, 7)
+
+example_dat <- data.frame(Gait=increments, 
+                          mean= res_healthy_2way$mu,
+                          exp1 = res_healthy_2way$mu + 7*res_healthy_2way$efunctions$level1[,1], 
+                          exp2 = res_healthy_2way$mu + 7*res_healthy_2way$efunctions$level1[,2])
+
+
+
+
+plot_mean <- ggplot(data=example_dat, aes(x=Gait, y=mean)) +geom_line(linewidth=1.1)+ 
+  geom_line(aes(x=Gait, y=exp1), linetype="longdash", col="#3B528B", linewidth=1.1 )+
+  geom_line(aes(x=Gait, y=exp2),  linetype="dotdash", col="darkorange", linewidth=1.1)+
+  
+  theme_bw()  + ylab("Angle") + ggtitle("(A) Mean Function + Eigenfunctions")
+
+# eigenvalues from mfpca.face
+evals1 <- res_healthy_2way$evalues$level1   # between-subject
+evals2 <- res_healthy_2way$evalues$level2    # within-subject
+
+# proportion of variance explained
+pve1 <- paste0(round(evals1 /sum(evals1)*100, 2), "%") 
+pve2 <- paste0(round(evals2 / sum(evals2)*100, 2), "%")
+
+var_exp_1 <- data.frame(FPC= paste0("FPC", 1:3), Level="Between-subject", value=pve1[1:3])
+var_exp_2 <- data.frame(FPC= paste0("FPC",1:3), Level="Within-subject", value=pve2[1:3])
+
+sum(evals1[1:3])/sum(evals1)
+#88.6% of variance explained by the first three eigenfunctions
+
+var_exp <- rbind(var_exp_1, var_exp_2, x=-Inf, y=Inf)
+
+plot_efunction <- ggplot(fpca_results_healthy, aes(x=Gait, y=Eigenfunction)) + geom_line() +  theme_bw()+
+  theme(
+    strip.text.y = element_text(angle = 0), # 0 makes text horizontal
+    strip.background = element_rect(fill = "white", color = "black")
+  ) +
+  geom_text(
+    data = var_exp %>% filter(FPC %in% c("FPC1", "FPC2", "FPC3", "FPC4")),
+    aes(x = 89, y = 2, label = value),     
+    inherit.aes = FALSE)+
+  facet_grid(FPC~Level) + ggtitle("(B) Eigenfunctions")
+
+
+plot_scores <- ggplot(data = data.frame(score1=res_healthy_2way$scores$level1[,1], 
+                                        score2=res_healthy_2way$scores$level1[,2]), 
+                      aes(x=score1, y=score2)) + theme_bw()+geom_point()+ 
+  xlab("Subject-level FPC1 score") + ylab("Subject-level FPC2 score") + 
+  ggtitle("(C) Subject-level scores")
+
+
+healthy_fpca <- ggarrange(ggarrange(plot_mean, plot_scores, ncol=1),
+                          plot_efunction, widths=c(0.4, 0.6), ncol=2 )
+
+healthy_fpca
+```
+
+# MFPCA projection scores on PD dataset
+
+We first prepare the PD dataset by arranging it in wide format. We also obtain the mean peak of the swing phase as a scalar metric which may be of interest.
+
+```{r}
+#| message: false
+#| warning: false
+wide_dat <- PD_data %>%     
+dplyr::select(Subject, Medication, `Gait cycle [%]`, Stride, value) %>%   mutate(Subject_Stride = interaction(Subject, Stride, Medication, sep = "_"))     
+
+wide_dat <- wide_dat %>%      
+  pivot_wider(id_cols=Subject_Stride,                
+              names_from=`Gait cycle [%]`,               
+              values_from=value)    
+
+wide_dat <- wide_dat %>% 
+  separate(Subject_Stride,   
+           into = c("Subject", "Stride", "Medication"),   
+           sep = "_",   convert = TRUE )   
+
+#separate data into on and off medication 
+off_dat <- wide_dat %>% filter(Medication=="off")
+on_dat <- wide_dat %>% filter(Medication=="on")
+
+
+#Obtain Mean peak of swing phase   
+peak_data <- PD_data %>% group_by(Subject, Medication, Stride) %>%
+  summarise(peak=max(value)) 
+peak_data <- peak_data %>% group_by(Subject, Medication) %>% 
+  summarise(mean_peak=mean(peak))
+```
+
+We now use the pre-prepared functions to obtain projection scores.
+
+```{r}
+#project PD data onto two level mfpca healthy
+predicted_scores_off = predict_mfpca_scores_wide(
+  res_healthy_2way, 
+  off_dat[,-c(1:3, 104)], 
+  off_dat$Subject, 
+  res_healthy_2way$sigma2)
+
+predicted_scores_off = predicted_scores_off %>% 
+  dplyr::select(ID, L1_PC1, L1_PC2, L1_PC3) %>% 
+  distinct()
+
+```
+
+We regress the MFPCA projection scores against the clinical outcomes (MDS-UPDRS Part II and Part III). We compare these with regression of the mean peak of the swing phase against the clinical outcomes.
+
+```{r}
+#| message: false
+#| warning: false
+pd_dat <- data.frame(FPC1=predicted_scores_off$L1_PC1, 
+                            FPC2=predicted_scores_off$L1_PC2,
+                            FPC3=predicted_scores_off$L1_PC3,
+                            UPDRS_II=as.numeric(diagnosis_wide$UPDRS_II_OFF), 
+                            UPDRS_III=as.numeric(diagnosis_wide$UPDRS_III_OFF), 
+mean_peak=peak_data[peak_data$Medication=="off", "mean_peak"])
+
+summary(lm(pd_dat$FPC1~pd_dat$UPDRS_II))
+p1 <- ggplot(pd_dat, aes(x=UPDRS_II, y=FPC1)) +geom_point() +  xlab("")+ylab("FPC1")+theme_bw() + 
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  annotate(
+    "text",
+    x = Inf,
+    y = Inf,
+    label ="p ==0.880 * ',' ~ R^2 == 0.001",
+    parse=TRUE,
+    hjust = 1.1,
+    vjust = 1.1
+  )
+
+summary(lm(pd_dat$FPC2~pd_dat$UPDRS_II))
+
+p2 <- ggplot(pd_dat, aes(x=UPDRS_II, y=FPC2)) +geom_point() + xlab("")+ylab("FPC2")+ theme_bw() + 
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  annotate(
+    "text",
+    x = Inf,
+    y = Inf,
+    label ="p ==0.00193 * ',' ~ R^2 == 0.39",
+    parse=TRUE,
+    hjust = 1.1,
+    vjust = 1.1
+  )
+
+summary(lm(pd_dat$FPC3~pd_dat$UPDRS_II))
+
+p3 <- ggplot(pd_dat, aes(x=UPDRS_II, y=FPC3)) +geom_point()+ xlab("") +ylab("FPC3")+  theme_bw() + 
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  annotate(
+    "text",
+    x = Inf,
+    y = Inf,
+    label ="p ==0.0003 * ',' ~ R^2 == 0.49",
+    parse=TRUE,
+    hjust = 1.1,
+    vjust = 1.1
+  )
+
+
+summary(lm(pd_dat$FPC1~pd_dat$UPDRS_III))
+p11 <- ggplot(pd_dat, aes(x=UPDRS_III, y=FPC1)) +geom_point()+ xlab("") +ylab("")+theme_bw() + 
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  annotate(
+    "text",
+    x = Inf,
+    y = Inf,
+    label ="p ==0.909 * ',' ~ R^2 == 0.001",
+    parse=TRUE,
+    hjust = 1.1,
+    vjust = 1.1
+  )
+
+summary(lm(pd_dat$FPC2~pd_dat$UPDRS_III))
+
+p22 <- ggplot(pd_dat, aes(x=UPDRS_III, y=FPC2)) +geom_point()+ xlab("") +ylab("")+ theme_bw() + 
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  annotate(
+    "text",
+    x = Inf,
+    y = Inf,
+    label ="p ==0.0248 * ',' ~ R^2 == 0.23",
+    parse=TRUE,
+    hjust = 1.1,
+    vjust = 1.1
+  )
+
+summary(lm(pd_dat$FPC3~pd_dat$UPDRS_III))
+
+p33 <- ggplot(pd_dat, aes(x=UPDRS_III, y=FPC3)) +geom_point() + xlab("")+ylab("")+  theme_bw() + 
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  annotate(
+    "text",
+    x = Inf,
+    y = Inf,
+    label ="p ==0.00067 * ',' ~ R^2 == 0.45",
+    parse=TRUE,
+    hjust = 1.1,
+    vjust = 1.1
+  )
+
+summary(lm(pd_dat$mean_peak~pd_dat$UPDRS_II))
+
+PUII <- ggplot(pd_dat, aes(x=UPDRS_II, y=mean_peak)) +geom_point() + ylab("Mean Peak")+theme_bw() + 
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  annotate(
+    "text",
+    x = Inf,
+    y = Inf,
+    label ="p ==0.00238 * ',' ~ R^2 == 0.376",
+    parse=TRUE,
+    hjust = 1.1,
+    vjust = 1.1
+  )
+
+summary(lm(pd_dat$mean_peak~pd_dat$UPDRS_III))
+
+PUIII <- ggplot(pd_dat, aes(x=UPDRS_III, y=mean_peak)) +geom_point() + ylab("Mean Peak")+ theme_bw() + 
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  annotate(
+    "text",
+    x = Inf,
+    y = Inf,
+    label ="p ==0.00724 * ',' ~ R^2 == 0.309",
+    parse=TRUE,
+    hjust = 1.1,
+    vjust = 1.1
+  )
+
+conv_validity <- ggarrange(
+  p1,p11,
+  p2, p22, 
+  p3, p33, 
+  PUII,PUIII,
+  ncol=2, nrow=4)
+
+conv_validity
+```
+
+# MFPCA projection scores - on/off medication
+
+We now obtain MFPCA projection scores on the "on medication" dataset.
+
+```{r}
+
+predicted_scores_on = predict_mfpca_scores_wide(
+  res_healthy_2way, 
+  on_dat[,-c(1:3, 104)], 
+  on_dat$Subject, 
+  res_healthy_2way$sigma2)
+
+predicted_scores_on = predicted_scores_on %>% 
+  dplyr::select(ID, L1_PC1, L1_PC2, L1_PC3) %>% 
+  distinct()
+```
+
+We compute changes compared to the "off medication" scores. We also do this for the clinical MDS-UPDRS scores Part II and Part III, and the mean peak.
+
+```{r}
+change_scores = data.frame(change_FPC1=predicted_scores_on$L1_PC1-predicted_scores_off$L1_PC1, 
+                           change_FPC2=predicted_scores_on$L1_PC2-predicted_scores_off$L1_PC2, 
+                           change_FPC3=predicted_scores_on$L1_PC3-predicted_scores_off$L1_PC3, 
+                     UPDRS_II=as.numeric(diagnosis_wide$UPDRS_II_ON)-as.numeric(diagnosis_wide$UPDRS_II_OFF), 
+                     UPDRS_III=as.numeric(diagnosis_wide$UPDRS_II_ON)-as.numeric(diagnosis_wide$UPDRS_III_OFF), 
+                     change_peak = peak_data[peak_data$Medication=="on", "mean_peak"]-  peak_data[peak_data$Medication=="off", "mean_peak"])
+```
+
+We now regress changes in MFPCA projection scores against changes in the clinical outcomes.
+
+```{r}
+#| message: false
+#| warning: false
+
+change_scores = data.frame(change_FPC1=predicted_scores_on$L1_PC1-predicted_scores_off$L1_PC1, 
+                           change_FPC2=predicted_scores_on$L1_PC2-predicted_scores_off$L1_PC2, 
+                           change_FPC3=predicted_scores_on$L1_PC3-predicted_scores_off$L1_PC3, 
+                     UPDRS_II=as.numeric(diagnosis_wide$UPDRS_II_ON)-as.numeric(diagnosis_wide$UPDRS_II_OFF), 
+                     UPDRS_III=as.numeric(diagnosis_wide$UPDRS_II_ON)-as.numeric(diagnosis_wide$UPDRS_III_OFF), 
+                     change_peak = peak_data[peak_data$Medication=="on", "mean_peak"]-  peak_data[peak_data$Medication=="off", "mean_peak"])
+
+summary(lm(change_scores$change_FPC1~change_scores$UPDRS_II))
+p1 <- ggplot(change_scores, aes(x=UPDRS_II, y=change_FPC1)) +geom_point() + xlab("")+ylab("Change FPC1")+theme_bw() + 
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  annotate(
+    "text",
+    x = Inf,
+    y = Inf,
+    label ="p ==0.736* ',' ~ R^2 == 0.006",
+    parse = TRUE,    hjust = 1.1,
+    vjust = 1.1
+  )
+
+summary(lm(change_scores$change_FPC2~change_scores$UPDRS_II))
+p2 <- ggplot(change_scores, aes(x=UPDRS_II, y=change_FPC2)) +geom_point() + xlab("")+ylab("Change FPC2")+theme_bw() + 
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  annotate(
+    "text",
+    x = Inf,
+    y = Inf,
+    label ="p ==0.005* ',' ~ R^2 ==  0.33",
+    parse = TRUE,
+    hjust = 1.1,
+    vjust = 1.1
+  )
+
+summary(lm(change_scores$change_FPC3~change_scores$UPDRS_II))
+p3 <- ggplot(change_scores, aes(x=UPDRS_II, y=change_FPC3)) +geom_point() + xlab("")+ylab("Change FPC3")+theme_bw() + 
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  annotate(
+    "text",
+    x = Inf,
+    y = Inf,
+    label ="p ==0.025* ',' ~ R^2 ==  0.227",
+    parse = TRUE,
+    hjust = 1.1,
+    vjust = 1.1
+  )
+
+summary(lm(change_scores$mean_peak~change_scores$UPDRS_II))
+PUII <- ggplot(change_scores, aes(x=UPDRS_II, y=mean_peak)) +geom_point() + xlab("Change UPDRS-II")+ylab("Change Mean Peak")+theme_bw() + 
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  annotate(
+    "text",
+    x = Inf,
+    y = Inf,
+    label ="p ==0.052* ',' ~ R^2 ==  0.175",
+    parse = TRUE,
+    hjust = 1.1,
+    vjust = 1.1
+  )
+
+summary(lm(change_scores$change_FPC1~change_scores$UPDRS_III))
+p11 <- ggplot(change_scores, aes(x=UPDRS_III, y=change_FPC1)) +geom_point() + xlab("")+ylab("")+theme_bw() + 
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  annotate(
+    "text",
+    x = Inf,
+    y = Inf,
+    label ="p ==0.108* ',' ~ R^2 ==  0.124",
+    parse = TRUE,
+    hjust = 1.1,
+    vjust = 1.1
+  )
+
+
+
+summary(lm(change_scores$change_FPC2~change_scores$UPDRS_III))
+p22 <- ggplot(change_scores, aes(x=UPDRS_III, y=change_FPC2)) +geom_point() + xlab("")+ylab("")+theme_bw() + 
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  annotate(
+    "text",
+    x = Inf,
+    y = Inf,
+    label ="p ==0.380* ',' ~ R^2 ==  0.039",
+    parse = TRUE,
+    hjust = 1.1,
+    vjust = 1.1
+  )
+
+
+summary(lm(change_scores$change_FPC3~change_scores$UPDRS_III))
+p33 <- ggplot(change_scores, aes(x=UPDRS_III, y=change_FPC3)) +geom_point() + xlab("")+ylab("")+theme_bw() + 
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  annotate(
+    "text",
+    x = Inf,
+    y = Inf,
+    label ="p ==0.086* ',' ~ R^2 ==  0.141",
+    parse = TRUE,
+    hjust = 1.1,
+    vjust = 1.1
+  )
+
+
+
+summary(lm(change_scores$mean_peak~change_scores$UPDRS_III))
+PUIII <- ggplot(change_scores, aes(x=UPDRS_III, y=mean_peak)) +geom_point() + xlab("Change UPDRS-III")+ylab("")+theme_bw() + 
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  annotate(
+    "text",
+    x = Inf,
+    y = Inf,
+    label ="p ==0.367* ',' ~ R^2 ==  0.041",
+    parse = TRUE,
+    hjust = 1.1,
+    vjust = 1.1
+  )
+
+
+conv_validity <- ggarrange(
+  p1,p11,
+  p2, p22, 
+  p3, p33, 
+  PUII,PUIII,
+  ncol=2, nrow=4)
+
+conv_validity
+
+```
