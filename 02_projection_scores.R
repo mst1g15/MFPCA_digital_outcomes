@@ -7,6 +7,7 @@
 
 
 predict_fpca_same_grid <- function(fpca_obj, newdata) {
+  #Purpose: obtain fpca projection scores for a new dataset, given an fpca object 
   #Input: fpca_obj - is an fpca object from the refund package; 
   #       this has been fit on a reference dataset
   #       Note this is in the univariate fpca setting.
@@ -15,18 +16,17 @@ predict_fpca_same_grid <- function(fpca_obj, newdata) {
   #       in the newdata dataset. 
   
   
-  # 1. Ensure newdata is a matrix
+  #ensure newdata is a matrix
   newdata <- as.matrix(newdata)
   
-  # 2. Extract components from the fpca object
+  # extract components from the fpca object
   mu  <- fpca_obj$mu           # The estimated mean function
   phi <- fpca_obj$efunctions  # The eigenfunctions (basis)
   
-  # 3. Center the new data: subtract the mean from every row
-  # sweep() is efficient for row-wise subtraction
+  #center the new data: subtract the mean from every row
   newdata_centered <- sweep(newdata, 2, mu, "-")
   
-  # 4. Calculate Scores: Projection onto the eigenfunctions
+  #calculate Scores: Projection onto the eigenfunctions
   # Scores = (Y - mu) %*% phi
   new_scores <- newdata_centered %*% phi
   
@@ -40,6 +40,7 @@ predict_mfpca_scores_wide <- function(object,
                                       Y_new_matrix,
                                       id_new_vector,
                                       sigma_e) {
+  #Purpose: obtain mfpca projection scores for a new dataset, given an mfpca object 
   #Input: object - is an mfpca object from the refund package; 
   #       this has been fit on a reference dataset
   #       Note this is in the two-level fpca setting.
@@ -48,10 +49,10 @@ predict_mfpca_scores_wide <- function(object,
   #       the same individual (since we are in the repeated measures setting)
   #       sigma_e - this is the error vector from the mfcpa
   #Output: new_scores - a matrix of scores for each individual and each curves
-  #       in the new dataset. 
-  # -----------------------------------------------
-  # Validate input
-  # -----------------------------------------------
+  #       in the new dataset.
+  
+  #Check input------------------------------------------------------------------
+  
   if (missing(sigma_e))
     stop("Must supply measurement error variance sigma_e.")
   
@@ -61,9 +62,7 @@ predict_mfpca_scores_wide <- function(object,
   if (length(id_new_vector) != N)
     stop("id_new_vector length must match number of curves (N).")
   
-  # -----------------------------------------------
-  # Extract components from object
-  # -----------------------------------------------
+  #extract components from object-----------------------------------------------
   mu_hat <- as.numeric(object$mu)
   if (length(mu_hat) != L)
     stop("Length of object$mu must match # of columns in Y_new_matrix (L).")
@@ -85,23 +84,18 @@ predict_mfpca_scores_wide <- function(object,
   # uniform grid weights
   weights <- rep(1 / L, L)
   
-  # -----------------------------------------------
-  ## 1. Center data
-  # -----------------------------------------------
+  #Center data------------------------------------------------------------------
+  
   Y_centered <- sweep(Y_new_matrix, 2, mu_hat, "-")
   
-  # -----------------------------------------------
-  ## 2. Raw Level 1 Projections
-  # -----------------------------------------------
+  #Obtain raw Level 1 Projections-----------------------------------------------
   # Raw projection of each curve onto L1 basis (c_ij in the notation)
   raw_L1 <- Y_centered %*% (Phi1 * weights)    # N × K1
   
-  # -----------------------------------------------
-  ## 3. Compute subject-average Level 1 projections
-  # -----------------------------------------------
+  #Compute subject-average Level 1 projections
   df <- data.frame(ID = id_new_vector, raw_L1)
   
-  # Calculate mean projection per subject (c̄_i in the notation)
+  #Calculate mean projection per subject (c̄_i in the notation)
   mean_by_id <- aggregate(df[ , -1, drop = FALSE],
                           by = list(ID = df$ID),
                           FUN = mean)
@@ -109,13 +103,11 @@ predict_mfpca_scores_wide <- function(object,
   subject_ids <- mean_by_id$ID
   cbar <- as.matrix(mean_by_id[ , -1, drop = FALSE])    # n_subject × K1
   
-  # Number of curves (visits) per subject (m_i)
+  #Number of curves (visits) per subject (m_i)
   m_tbl <- table(id_new_vector)
   m_vec <- as.numeric(m_tbl[match(subject_ids, names(m_tbl))])
   
-  # -----------------------------------------------
-  ## 4. EBLUP Level-1 score estimation (Subject-Specific Scores)
-  # -----------------------------------------------
+  #EBLUP Level-1 score estimation (between-subect Scores)-------------------------
   # Formula: b_i = (λ1 / (λ1 + σ_e/m_i)) * c̄_i
   n_subjects <- length(subject_ids)
   b_hat <- matrix(0, n_subjects, K1)
@@ -128,18 +120,14 @@ predict_mfpca_scores_wide <- function(object,
   
   rownames(b_hat) <- subject_ids
   
-  # Expand back to N curves according to ID order
+  #Expand back to N curves according to ID order
   b_hat_expanded <- b_hat[match(id_new_vector, subject_ids), , drop = FALSE]
   
-  # -----------------------------------------------
-  ## 5. Level-1 fitted functions
-  # -----------------------------------------------
-  # F1: Fitted function based on L1 scores: mu_hat + Phi1 %*% b_hat
+  # Level-1 fitted functions------------------------------------------------
+  #F1: Fitted function based on L1 scores: mu_hat + Phi1 %*% b_hat
   F1 <- b_hat_expanded %*% t(Phi1)    # N × L
   
-  # -----------------------------------------------
-  ## 6. EBLUP Level-2 scores (Visit-Specific Scores)
-  # -----------------------------------------------
+  #EBLUP Level-2 scores (within-subject scores)---------------------------------
   # Calculate residuals after removing the L1 fitted part
   residuals <- Y_centered - F1
   
@@ -155,9 +143,9 @@ predict_mfpca_scores_wide <- function(object,
     L2_scores[, k] <- shrink * raw_L2_tilde[, k]
   }
   
-  # -----------------------------------------------
-  ## 7. Final combined scores
-  # -----------------------------------------------
+  # Final combined scores
+  
+  
   final_scores <- cbind(b_hat_expanded, L2_scores)
   colnames(final_scores) <- c(
     paste0("L1_PC", 1:K1),
