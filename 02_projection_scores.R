@@ -1,3 +1,4 @@
+
 # Project: MFPCA digital outcomes 
 # Script Purpose: functions to obtain MFPCA projection scores  
 # Author: Mia Tackney 
@@ -39,22 +40,16 @@ predict_fpca_same_grid <- function(fpca_obj, newdata) {
 predict_mfpca_scores_wide <- function(object,
                                       Y_new_matrix,
                                       id_new_vector,
-                                      sigma_e) {
-  #Purpose: obtain mfpca projection scores for a new dataset, given an mfpca object 
-  #Input: object - is an mfpca object from the refund package; 
-  #       this has been fit on a reference dataset
-  #       Note this is in the two-level fpca setting.
-  #       Y_new_matrix - is a dataset from a new group
-  #       id_new_vector - this is an identifier for curves from 
-  #       the same individual (since we are in the repeated measures setting)
-  #       sigma_e - this is the error vector from the mfcpa
-  #Output: new_scores - a matrix of scores for each individual and each curves
-  #       in the new dataset.
+                                      sigma_e = object$sigma2) {
+  # Purpose: Obtain MFPCA projection scores for a new dataset given a fitted refund MFPCA object
+  # Inputs:
+  #   object        - Two-level MFPCA object from the refund package
+  #   Y_new_matrix  - Matrix of new curves (N_curves x L)
+  #   id_new_vector - Subject identifier vector of length N_curves
+  #   sigma_e       - Estimated pointwise error variance (defaults to object$sigma2)
   
-  #Check input------------------------------------------------------------------
-  
-  if (missing(sigma_e))
-    stop("Must supply measurement error variance sigma_e.")
+  if (is.null(sigma_e) || missing(sigma_e))
+    stop("Must supply measurement error variance sigma_e (e.g., object$sigma2).")
   
   Y_new_matrix <- as.matrix(Y_new_matrix)
   N <- nrow(Y_new_matrix)
@@ -62,89 +57,73 @@ predict_mfpca_scores_wide <- function(object,
   if (length(id_new_vector) != N)
     stop("id_new_vector length must match number of curves (N).")
   
-  #extract components from object-----------------------------------------------
+  # Extract components from reference MFPCA object
   mu_hat <- as.numeric(object$mu)
   if (length(mu_hat) != L)
     stop("Length of object$mu must match # of columns in Y_new_matrix (L).")
   
-  Phi1 <- as.matrix(object$efunctions$level1)    # L × K1
-  Phi2 <- as.matrix(object$efunctions$level2)    # L × K2
+  Phi1 <- as.matrix(object$efunctions$level1)    # L x K1
+  Phi2 <- as.matrix(object$efunctions$level2)    # L x K2
   
   K1 <- ncol(Phi1)
   K2 <- ncol(Phi2)
   
-  lambda1 <- as.numeric(object$evalues$level1)  # length K1
-  lambda2 <- as.numeric(object$evalues$level2)  # <--- NEW: Level 2 eigenvalues
+  lambda1 <- as.numeric(object$evalues$level1)   # length K1
+  lambda2 <- as.numeric(object$evalues$level2)   # length K2
   
   if (length(lambda1) != K1)
     stop("object$evalues$level1 length must equal ncol(Phi1).")
   if (length(lambda2) != K2)
     stop("object$evalues$level2 length must equal ncol(Phi2).")
   
-  # uniform grid weights
+  # Uniform quadrature weights on [0, 1]
   weights <- rep(1 / L, L)
   
-  #Center data------------------------------------------------------------------
-  
+  # Center new curves using reference mean function
   Y_centered <- sweep(Y_new_matrix, 2, mu_hat, "-")
   
-  #Obtain raw Level 1 Projections-----------------------------------------------
-  # Raw projection of each curve onto L1 basis (c_ij in the notation)
-  raw_L1 <- Y_centered %*% (Phi1 * weights)    # N × K1
+  # Raw Level-1 projections (c_{ijk1})
+  raw_L1 <- Y_centered %*% (Phi1 * weights)      # N x K1
   
-  #Compute subject-average Level 1 projections
+  # Subject-average Level-1 projections (\bar{c}_{ik1})
   df <- data.frame(ID = id_new_vector, raw_L1)
-  
-  #Calculate mean projection per subject (c̄_i in the notation)
-  mean_by_id <- aggregate(df[ , -1, drop = FALSE],
+  mean_by_id <- aggregate(df[, -1, drop = FALSE],
                           by = list(ID = df$ID),
                           FUN = mean)
   
   subject_ids <- mean_by_id$ID
-  cbar <- as.matrix(mean_by_id[ , -1, drop = FALSE])    # n_subject × K1
+  cbar <- as.matrix(mean_by_id[, -1, drop = FALSE])   # n_subjects x K1
   
-  #Number of curves (visits) per subject (m_i)
-  m_tbl <- table(id_new_vector)
-  m_vec <- as.numeric(m_tbl[match(subject_ids, names(m_tbl))])
+  # Number of curves per subject (n_i)
+  n_tbl <- table(id_new_vector)
+  n_vec <- as.numeric(n_tbl[match(subject_ids, names(n_tbl))])
   
-  #EBLUP Level-1 score estimation (between-subect Scores)-------------------------
-  # Formula: b_i = (λ1 / (λ1 + σ_e/m_i)) * c̄_i
+  # EBLUP Level-1 score estimation (\hat{\eta}_{ik1})
   n_subjects <- length(subject_ids)
   b_hat <- matrix(0, n_subjects, K1)
   
   for (i in seq_len(n_subjects)) {
-    # Calculate shrinkage factor for each PC, based on the subject's m_i
-    shrink <- lambda1 / (lambda1 + sigma_e / m_vec[i])
+    shrink <- lambda1 / (lambda1 + sigma_e / (L * n_vec[i]))
     b_hat[i, ] <- shrink * cbar[i, ]
   }
-  
   rownames(b_hat) <- subject_ids
   
-  #Expand back to N curves according to ID order
+  # Expand back to N curves according to original ID order
   b_hat_expanded <- b_hat[match(id_new_vector, subject_ids), , drop = FALSE]
   
-  # Level-1 fitted functions------------------------------------------------
-  #F1: Fitted function based on L1 scores: mu_hat + Phi1 %*% b_hat
-  F1 <- b_hat_expanded %*% t(Phi1)    # N × L
-  
-  #EBLUP Level-2 scores (within-subject scores)---------------------------------
-  # Calculate residuals after removing the L1 fitted part
+  # Level-1 fitted functions (\hat{f}^{(1)}_i) and subject-detrended residuals (r_{ij})
+  F1 <- b_hat_expanded %*% t(Phi1)               # N x L
   residuals <- Y_centered - F1
   
-  # Raw projection of residuals onto L2 basis (̃c_ij in the notation)
-  raw_L2_tilde <- residuals %*% (Phi2 * weights)  # N × K2
+  # Raw Level-2 projections (\tilde{c}_{ijk2})
+  raw_L2_tilde <- residuals %*% (Phi2 * weights) # N x K2
   
-  # Apply shrinkage for Level 2 scores <--- THE CRUCIAL CORRECTION
-  # Formula: a_ij = (λ2 / (λ2 + σ_e)) * ̃c_ij
+  # EBLUP Level-2 score estimation (\hat{\xi}_{ijk2})
   L2_scores <- matrix(0, N, K2)
   for (k in seq_len(K2)) {
-    # Calculate shrinkage factor (does not depend on m_i or ID)
-    shrink <- lambda2[k] / (lambda2[k] + sigma_e)
+    shrink <- lambda2[k] / (lambda2[k] + sigma_e / L)
     L2_scores[, k] <- shrink * raw_L2_tilde[, k]
   }
-  
-  # Final combined scores
-  
   
   final_scores <- cbind(b_hat_expanded, L2_scores)
   colnames(final_scores) <- c(
@@ -154,4 +133,3 @@ predict_mfpca_scores_wide <- function(object,
   
   return(data.frame(ID = id_new_vector, final_scores))
 }
-
