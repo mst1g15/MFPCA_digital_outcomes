@@ -15,10 +15,15 @@ generate_healthy_group <- function(res, all_dat_name, increments){
   #representing ECG curves from two measurements occasions. 
   
   mu  <- res$mu                        # Mean function
+  T_len    <- length(mu)                  # Grid length (e.g., 308)
   phi_b <- res$efunctions$level1       # Between eigenfunctions (T x Kb)   #308 x 3
   phi_w <- res$efunctions$level2       # Within eigenfunctions (T x Kw)   #308 x 3
   scores_b <- res$scores$level1        # Between scores (N_subjects x Kb)   #64 * 3
   scores_w <- res$scores$level2        # Within scores (N_obs x Kw)   #1392 x 3
+  
+  # Estimated measurement error SD from refund object
+  sigma_eps <- sqrt(max(res$sigma2, 0))
+  
   all_ids <- all_dat_name
   id_unique <- unique(all_dat_name)    # Which subject each observation belongs to
   time <- increments                   # Evaluation grid
@@ -44,14 +49,18 @@ generate_healthy_group <- function(res, all_dat_name, increments){
     sw1 <- mvrnorm(n = n_i, mu = score_w_mean, Sigma = scores_w_sigma) 
     sw2 <- mvrnorm(n = n_i, mu = score_w_mean, Sigma = scores_w_sigma) 
     
-    # make matrices compatible for addition
-    mu_mat <- matrix(mu, nrow = 308, ncol = n_i)
+    # Independent measurement error matrices (T_len x n_i)
+    err1 <- matrix(rnorm(T_len * n_i, mean = 0, sd = sigma_eps), nrow = T_len, ncol = n_i)
+    err2 <- matrix(rnorm(T_len * n_i, mean = 0, sd = sigma_eps), nrow = T_len, ncol = n_i)
     
-    between_mat <- matrix(phi_b %*% sb, nrow = 308, ncol = n_i)
+    # make matrices compatible for addition
+    mu_mat <- matrix(mu, nrow = T_len, ncol = n_i)
+    
+    between_mat <- matrix(phi_b %*% sb, nrow = T_len, ncol = n_i)
     
     # reconstruct
-    X_subj_day1 <- mu_mat + between_mat + phi_w %*% t(sw1) 
-    X_subj_day2 <- mu_mat + between_mat + phi_w %*% t(sw2) 
+    X_subj_day1 <- mu_mat + between_mat + phi_w %*% t(sw1) +err1
+    X_subj_day2 <- mu_mat + between_mat + phi_w %*% t(sw2) +err2
     
     X_hat_day1 <- rbind(X_hat_day1, t(X_subj_day1)) 
     X_hat_day2 <- rbind(X_hat_day2, t(X_subj_day2)) 
