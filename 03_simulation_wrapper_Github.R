@@ -17,10 +17,12 @@ load("Analysis_Outputs/healthy_ECG_landmarked.RData")
 
 
 #mfpca with refund package----------------------------------------------------
+#note - this step is only possible with real data 
 Y_mat <- t(eval.fd(increments, regfd))
 all_dat_name <- ecg_dat$Name
 k=5
 res <- mfpca.face(Y = Y_mat, id = all_dat_name, visit=NULL, npc = c(k,k))
+
 
 
 #obtain average curve for each subject and run fpca----------------------------
