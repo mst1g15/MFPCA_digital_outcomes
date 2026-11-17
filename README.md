@@ -34,7 +34,6 @@ Note that the data is not provided. The code can be checked here but cannot be r
 
 ## Vignette 
 A vignette is provided for the analysis of knee flexion-extension data from individuals with PD.
-Please view it at: https://mst1g15.github.io/MFPCA_digital_outcomes/
-- `PD MFPCA vignette.qmd` is a Quarto markdown file for the vignette
+- `PD MFPCA vignette.qmd` is a Quarto markdown file for the vignette, and a rendered html version is also available.
 
 
