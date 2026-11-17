@@ -1,7 +1,7 @@
 # Project: MFPCA digital outcomes 
 # Script Purpose: extract left knee flexion/extension data from open source gait data
 # Author: Mia Tackney 
-# Date: 2026-04-15
+# Date: 2026-11-17
 # GitHub: https://github.com/mst1g15/MFPCA_digital_outcomes
 
 #load packages 
@@ -10,7 +10,7 @@ source("00_init.R")
 #Parkinson's Disease Dataset----------------------------------------------------
 
 #This is obtained from: 
-#Boari, Daniel (2021). A dataset of overground walking full-body kinematics and 
+#Daniel Boari(2021). A dataset of overground walking full-body kinematics and 
 #kinetics in individuals with Parkinson’s disease. figshare. Dataset. 
 #https://doi.org/10.6084/m9.figshare.14896881.v4
 
@@ -57,18 +57,32 @@ saveRDS(all_data, "Datasets/left_knee_data.RDS")
 #Healthy Dataset ---------------------------------------------------------------
 
 #This is obtained from: 
-#Helwig, N. & Hsiao-Wecksler, E. (2016). Multivariate Gait Data. Dataset. 
-#UCI Machine Learning Repository. https://doi.org/10.24432/C5861T.
+#Claudiane Fukuchi, Reginaldo Fukuchi, and Marcos Duarte. A public data set of overground and
+#treadmill walking kinematics and kinetics of healthy individuals, 2018. URL 
+#https://figshare.com/articles/dataset/A_public_data_set_of_overground_and_treadmill_walking_kinematics_and_kinetics_of_healthy_individuals/5722711
 
-#obtain knee flexion/extension data 
-gait <- read.csv("Datasets_healthy_UCI/gait.csv")
 
-knee <- gait %>% filter(condition==1 &  #unbraced setting 
-                          leg==1 &        #left side 
-                          joint==2)
+files <- list.files(
+  path = "Datasets_Healthy_Fukuchi/51subjs/",
+  pattern = "ang.*\\.txt$")  
 
-colnames(knee) <- c("Subject", "Condition", "Stride",  "Leg", "Joint", "Gait cycle [%]", "Angle")
+all_data <- c()
 
-#Gait cycle on this dataset starts at zero instead of at one (which is the case for the PD dataset)
-knee$`Gait cycle [%]` <- knee$`Gait cycle [%]` +1
-saveRDS(knee, "Datasets/healthy_knee_data.RDS")
+for (i in files){
+  
+  data <- read.delim(paste0("Datasets_Healthy_Fukuchi/51subjs/", i))
+
+  #select knee flx/extension 
+  data <- data %>% dplyr::select(Time, LKneeAngleZ)
+  data$Subject <- as.integer(str_extract(i, "(?<=WBDS)\\d+"))
+  data$Stride <- str_extract(i, "(?<=walk)[A-Za-z0-9]+(?=ang)")
+  
+  all_data <- rbind(all_data, data)
+  
+}
+
+colnames(all_data) <- c("Gait cycle [%]", "Angle", "Subject", "Stride")
+saveRDS(all_data, "Datasets/Fukuchi_left_knee.RDS")
+
+#plot results 
+ggplot(all_data, aes(x=`Gait cycle [%]`, y=Angle, group=Stride)) + geom_line() + facet_wrap(.~Subject)
