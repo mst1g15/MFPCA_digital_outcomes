@@ -14,7 +14,8 @@ Boari, Daniel (2021). A dataset of overground walking full-body kinematics and k
 
 ### 3. Gait data from healthy individuals 
 This is an open source dataset obtained from:
-Helwig, N. & Hsiao-Wecksler, E. (2016). Multivariate Gait Data. Dataset. UCI Machine Learning Repository. https://doi.org/10.24432/C5861T.
+Claudiane Fukuchi, Reginaldo Fukuchi, and Marcos Duarte. A public data set of overground and treadmill walking kinematics and kinetics of healthy individuals, 2018. URL 
+https://figshare.com/articles/dataset/A_public_data_set_of_overground_and_treadmill_walking_kinematics_and_kinetics_of_healthy_individuals/5722711
 
 ## R code common to both the ECG Simulation and Gait data analyses 
 
