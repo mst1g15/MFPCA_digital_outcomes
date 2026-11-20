@@ -6,7 +6,7 @@ Welcome! This repository contains R scripts to run MFPCA to obtain low-dimension
 Three real-world datasets are part of the project. 
 
 ### 1. ECG data from Apple Watch Electrocardiograms 
-Apple Watch (AW) ECG data from healthy participants from a registry study aimed to assess the validity of smartwatch-based ECG recordings are used. This data is not publicly available. 
+Apple Watch (AW) ECG data from healthy participants from a registry study aimed to assess the validity of smartwatch-based ECG recordings are used. This data is not publicly available. However, code for running the simulation study is available. There are many open-source ECG datasets on PhysioNet, for example: https://www.physionet.org/about/database/. 
 
 ### 2. Gait data from individuals with Parkinson's disease
 This is an open source dataset obtained from: 
